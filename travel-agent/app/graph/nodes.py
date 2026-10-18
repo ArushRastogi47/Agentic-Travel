@@ -39,8 +39,15 @@ def weather_node(state: TravelState) -> dict:
     return weather_agent(state)
 
 
+def join_specialists_node(state: TravelState) -> dict:
+    """Sync barrier where parallel specialist branches merge."""
+    logger.info("[Join] Parallel specialists merged")
+    return {}
+
+
 def budget_node(state: TravelState) -> dict:
     return budget_agent(state)
+
 
 
 def itinerary_node(state: TravelState) -> dict:

@@ -44,29 +44,52 @@ def final_response_agent(state: TravelState) -> dict:
         ])
 
         final = response.content
+        if isinstance(final, list):
+            final = "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in final)
+        elif not isinstance(final, str):
+            final = str(final)
+
         logger.info("[Final Response] Generated successfully")
 
         return {
             "final_response": final,
-            "workflow_status": prev_status + ["✅ Final plan ready"],
+            "workflow_status": ["✅ Final plan ready"],
         }
 
     except Exception as exc:
         logger.error(f"[Final Response] LLM failed: {exc}")
-        # Fallback: just use the raw itinerary
-        itinerary = state.get("itinerary_plan", "No itinerary available.")
+        # Fallback: synthesize state data cleanly
+        itinerary = state.get("itinerary_plan", "")
         budget = state.get("budget_analysis", {})
+        weather = state.get("weather_info", {})
 
-        fallback = (
-            "# Your Travel Plan\n\n"
-            f"{itinerary}\n\n"
-            "## Budget Summary\n"
-            f"- Estimated total: ₹{budget.get('estimated_total', 'N/A'):,}\n"
-            f"- User budget: ₹{budget.get('user_budget', 'N/A'):,}\n"
-            f"- Within budget: {budget.get('within_budget', 'N/A')}\n\n"
-            "_All prices are estimated. No bookings have been made._"
-        )
+        fallback_parts = ["# Your Travel Plan\n"]
+        if itinerary:
+            fallback_parts.append(itinerary)
+            fallback_parts.append("\n")
+
+        if weather and weather.get("daily"):
+            fallback_parts.append("## Weather Forecast")
+            for day in weather["daily"][:5]:
+                fallback_parts.append(
+                    f"- **{day.get('date', '')}**: {day.get('description', '')}, High: {day.get('temperature_high', '')}°C, Low: {day.get('temperature_low', '')}°C"
+                )
+            fallback_parts.append("\n")
+
+        if budget:
+            est = budget.get("estimated_total", 0)
+            ub = budget.get("user_budget", 0)
+            fallback_parts.append("## Budget Summary")
+            fallback_parts.append(f"- Estimated total: ₹{est:,.0f}" if isinstance(est, (int, float)) else f"- Estimated total: {est}")
+            if ub:
+                fallback_parts.append(f"- User budget: ₹{ub:,.0f}" if isinstance(ub, (int, float)) else f"- User budget: {ub}")
+            fallback_parts.append(f"- Within budget: {budget.get('within_budget', True)}\n")
+
+        fallback_parts.append("_All prices are estimated. No bookings have been made._")
+        fallback = "\n".join(fallback_parts)
+
         return {
             "final_response": fallback,
-            "workflow_status": prev_status + ["⚠️ Final plan ready (basic format)"],
+            "workflow_status": ["⚠️ Final plan ready (basic format)"],
         }
+

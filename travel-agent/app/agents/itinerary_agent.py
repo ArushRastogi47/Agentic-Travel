@@ -77,12 +77,17 @@ def itinerary_agent(state: TravelState) -> dict:
         ])
 
         itinerary = response.content
+        if isinstance(itinerary, list):
+            itinerary = "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in itinerary)
+        elif not isinstance(itinerary, str):
+            itinerary = str(itinerary)
+
         logger.info("[Itinerary Agent] Plan generated successfully")
 
         return {
             "itinerary_plan": itinerary,
             "human_decision": "pending",
-            "workflow_status": prev_status + ["✅ Itinerary generated"],
+            "workflow_status": ["✅ Itinerary generated"],
         }
 
     except Exception as exc:
@@ -92,8 +97,9 @@ def itinerary_agent(state: TravelState) -> dict:
         return {
             "itinerary_plan": fallback,
             "human_decision": "pending",
-            "workflow_status": prev_status + ["⚠️ Itinerary generated (basic fallback)"],
+            "workflow_status": ["⚠️ Itinerary generated (basic fallback)"],
         }
+
 
 
 # ── Summarisers ───────────────────────────────────────────────────────

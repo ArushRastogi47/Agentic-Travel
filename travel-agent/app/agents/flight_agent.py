@@ -12,6 +12,11 @@ from app.tools.flights import get_flight_provider
 
 def flight_agent(state: TravelState) -> dict:
     """LangGraph node — fetch flight options."""
+    selected = state.get("selected_agents", ["flight"])
+    if "flight" not in selected:
+        logger.info("[Flight Agent] Skipping (not in selected_agents)")
+        return {}
+
     constraints = state.get("trip_constraints", {})
     destination = constraints.get("destination", "")
     origin = constraints.get("origin", "") or "Delhi"
@@ -20,20 +25,20 @@ def flight_agent(state: TravelState) -> dict:
 
     logger.info(f"[Flight Agent] Searching: {origin} → {destination}")
 
-    prev_status = state.get("workflow_status", [])
-
     try:
         provider = get_flight_provider()
         results = provider.search_flights(origin, destination, start_date, travelers)
-        flights = [r.model_dump() for r in results]
+        flights = [r.model_dump(mode="json") for r in results]
+
         logger.info(f"[Flight Agent] Found {len(flights)} options")
         return {
             "flight_results": flights,
-            "workflow_status": prev_status + ["✅ Flight research complete"],
+            "workflow_status": ["✅ Flight research complete"],
         }
     except Exception as exc:
         logger.error(f"[Flight Agent] Failed: {exc}")
         return {
             "flight_results": [],
-            "workflow_status": prev_status + ["⚠️ Flight research failed (continuing without)"],
+            "workflow_status": ["⚠️ Flight research failed (continuing without)"],
         }
+

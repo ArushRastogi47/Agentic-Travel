@@ -24,21 +24,26 @@ from app.persistence.database import (
     save_state,
 )
 
-# ── Init ───────────────────────────────────────────────────────────────
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_database()
+    logger.info("[API] Travel Agent API started")
+    yield
+
+
 app = FastAPI(
     title="LangGraph Travel Agent",
     description="Agentic AI Travel Planner — zero-cost, local-first",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # Build graph once at startup
 _graph = build_graph()
 
-
-@app.on_event("startup")
-def startup():
-    init_database()
-    logger.info("[API] Travel Agent API started")
 
 
 # ── Request / Response models ─────────────────────────────────────────
@@ -79,7 +84,13 @@ def create_trip(req: TripRequest):
         # Run graph until interrupt (human_review)
         result = _graph.invoke(initial_state, config=config)
 
-        status = "blocked" if result.get("validation_status") == "block" else "awaiting_review"
+        if result.get("validation_status") == "block":
+            status = "blocked"
+        elif result.get("final_response"):
+            status = "complete"
+        else:
+            status = "awaiting_review"
+
 
         save_state(thread_id, result)
 
@@ -87,10 +98,12 @@ def create_trip(req: TripRequest):
             thread_id=thread_id,
             status=status,
             itinerary=result.get("itinerary_plan"),
+            final_response=result.get("final_response"),
             workflow_status=result.get("workflow_status", []),
             budget_analysis=result.get("budget_analysis"),
             validation_reason=result.get("validation_reason"),
         )
+
 
     except Exception as exc:
         logger.error(f"[API] Graph execution failed: {exc}")

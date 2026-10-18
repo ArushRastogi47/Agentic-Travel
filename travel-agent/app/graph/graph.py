@@ -9,6 +9,9 @@ LangGraph graph definition — the complete travel-planning workflow.
 
 from __future__ import annotations
 
+import sqlite3
+from pathlib import Path
+
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
@@ -20,6 +23,7 @@ from app.graph.nodes import (
     hotel_node,
     human_review_node,
     itinerary_node,
+    join_specialists_node,
     supervisor_node,
     weather_node,
 )
@@ -28,9 +32,29 @@ from app.graph.routing import (
     after_guardrail,
     after_human_review,
     after_specialists,
+    after_supervisor,
 )
 from app.graph.state import TravelState
 from app.logging_config import logger
+from app.persistence.database import _get_db_path
+
+
+def get_default_checkpointer():
+    """Returns a persistent SqliteSaver, or MemorySaver as fallback."""
+    try:
+        from langgraph.checkpoint.sqlite import SqliteSaver
+
+        db_path = _get_db_path()
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(db_path, check_same_thread=False)
+        saver = SqliteSaver(conn)
+        saver.setup()
+        return saver
+    except Exception as exc:
+        logger.warning(
+            f"[Graph] Could not initialize SqliteSaver ({exc}), using MemorySaver"
+        )
+        return MemorySaver()
 
 
 def build_graph(checkpointer=None):
@@ -49,6 +73,7 @@ def build_graph(checkpointer=None):
     builder.add_node("flight_agent", flight_node)
     builder.add_node("hotel_agent", hotel_node)
     builder.add_node("weather_agent", weather_node)
+    builder.add_node("join_specialists", join_specialists_node)
     builder.add_node("budget_agent", budget_node)
     builder.add_node("itinerary_agent", itinerary_node)
     builder.add_node("human_review", human_review_node)
@@ -66,21 +91,45 @@ def build_graph(checkpointer=None):
         {"supervisor": "supervisor", "end": END},
     )
 
-    # supervisor → parallel specialists
-    # We use conditional edges to dynamically select which specialists run.
-    # For simplicity in LangGraph, we route through all three but each
-    # checks if it was selected.
-    builder.add_edge("supervisor", "flight_agent")
-    builder.add_edge("supervisor", "hotel_agent")
-    builder.add_edge("supervisor", "weather_agent")
+    # supervisor → dynamic fan-out to specialists (or jump forward)
+    builder.add_conditional_edges(
+        "supervisor",
+        after_supervisor,
+        [
+            "flight_agent",
+            "hotel_agent",
+            "weather_agent",
+            "budget_agent",
+            "itinerary_agent",
+            "final_response",
+        ],
+    )
 
-    # All specialists → budget
-    builder.add_edge("flight_agent", "budget_agent")
-    builder.add_edge("hotel_agent", "budget_agent")
-    builder.add_edge("weather_agent", "budget_agent")
+    # All parallel specialists converge at join node
+    builder.add_edge("flight_agent", "join_specialists")
+    builder.add_edge("hotel_agent", "join_specialists")
+    builder.add_edge("weather_agent", "join_specialists")
 
-    # budget → itinerary
-    builder.add_edge("budget_agent", "itinerary_agent")
+    # join_specialists → budget | itinerary | final_response
+    builder.add_conditional_edges(
+        "join_specialists",
+        after_specialists,
+        {
+            "budget_agent": "budget_agent",
+            "itinerary_agent": "itinerary_agent",
+            "final_response": "final_response",
+        },
+    )
+
+    # budget → itinerary | final_response
+    builder.add_conditional_edges(
+        "budget_agent",
+        after_budget,
+        {
+            "itinerary_agent": "itinerary_agent",
+            "final_response": "final_response",
+        },
+    )
 
     # itinerary → human review (interrupt)
     builder.add_edge("itinerary_agent", "human_review")
@@ -100,7 +149,7 @@ def build_graph(checkpointer=None):
 
     # ── Compile ────────────────────────────────────────────────────
     if checkpointer is None:
-        checkpointer = MemorySaver()
+        checkpointer = get_default_checkpointer()
 
     graph = builder.compile(
         checkpointer=checkpointer,
@@ -109,3 +158,4 @@ def build_graph(checkpointer=None):
 
     logger.info("[Graph] Compiled successfully")
     return graph
+

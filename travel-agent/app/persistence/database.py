@@ -136,3 +136,16 @@ def get_latest_state(thread_id: str) -> dict | None:
     if row:
         return json.loads(row["state_json"])
     return None
+
+
+def get_recent_conversations(limit: int = 10) -> list[dict]:
+    """Retrieve the most recent conversations."""
+    db_path = _get_db_path()
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT * FROM conversations ORDER BY updated_at DESC LIMIT ?", (limit,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+

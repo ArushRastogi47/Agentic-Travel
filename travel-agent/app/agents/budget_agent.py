@@ -114,6 +114,8 @@ def budget_agent(state: TravelState) -> dict:
     )
 
     return {
-        "budget_analysis": analysis.model_dump(),
-        "workflow_status": prev_status + ["✅ Budget calculated"],
+        "budget_analysis": analysis.model_dump(mode="json"),
+        "workflow_status": ["✅ Budget calculated"],
     }
+
+

@@ -17,6 +17,20 @@ def _replace(old: Any, new: Any) -> Any:
     return new
 
 
+def _merge_status(old: list[str] | None, new: list[str] | None) -> list[str]:
+    """
+    Reducer that appends status messages from parallel agents,
+    and supports resetting status on new iterations using '__RESET__'.
+    """
+    if not old:
+        return [item for item in (new or []) if item != "__RESET__"]
+    if not new:
+        return old
+    if new and new[0] == "__RESET__":
+        return [item for item in new[1:] if item != "__RESET__"]
+    return old + [item for item in new if item != "__RESET__"]
+
+
 class TravelState(TypedDict, total=False):
     # ── User input ────────────────────────────────────────────────────
     user_query: Annotated[str, _replace]
@@ -50,4 +64,4 @@ class TravelState(TypedDict, total=False):
 
     # ── Metadata ──────────────────────────────────────────────────────
     iteration: Annotated[int, _replace]
-    workflow_status: Annotated[list[str], _replace]  # for UI progress
+    workflow_status: Annotated[list[str], _merge_status]  # for UI progress

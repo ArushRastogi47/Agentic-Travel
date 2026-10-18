@@ -29,24 +29,47 @@ def supervisor_agent(state: TravelState) -> dict:
     Falls back to heuristics if the LLM is unavailable.
     """
     query = state.get("user_query", "")
-    logger.info(f"[Supervisor] Analysing: {query!r}")
+    feedback = state.get("human_feedback", "")
+    iteration = state.get("iteration", 0)
+
+    # If this is a re-entry after human feedback, combine query with feedback
+    effective_query = query
+    if iteration > 0 and feedback:
+        effective_query = (
+            f"Original query: {query}\n"
+            f"User feedback/change request: {feedback}"
+        )
+        logger.info(f"[Supervisor] Iteration {iteration} re-analysing with feedback: {feedback!r}")
+    else:
+        logger.info(f"[Supervisor] Analysing: {query!r}")
 
     try:
-        result = _llm_route(query)
+        result = _llm_route(effective_query)
     except Exception as exc:
         logger.warning(f"[Supervisor] LLM failed ({exc}), using heuristic fallback")
-        result = _heuristic_route(query)
+        result = _heuristic_route(effective_query)
 
     logger.info(f"[Supervisor] Selected agents: {result.selected_agents}")
 
-    prev_status = state.get("workflow_status", [])
+    new_iteration = iteration + 1
+    if iteration > 0:
+        status_updates = [
+            "__RESET__",
+            f"🔄 Iteration {new_iteration}: Applying changes...",
+            "✅ Supervisor selected agents",
+        ]
+    else:
+        status_updates = ["✅ Supervisor selected agents"]
+
     return {
         "selected_agents": result.selected_agents,
-        "trip_constraints": result.trip_constraints.model_dump(),
+        "trip_constraints": result.trip_constraints.model_dump(mode="json"),
         "supervisor_reasoning": result.reasoning,
-        "workflow_status": prev_status + ["✅ Supervisor selected agents"],
-        "iteration": state.get("iteration", 0) + 1,
+        "workflow_status": status_updates,
+        "iteration": new_iteration,
     }
+
+
 
 
 # ── LLM-based routing ────────────────────────────────────────────────
@@ -67,10 +90,16 @@ def _llm_route(query: str) -> SupervisorOutput:
     ])
 
     raw = response.content
+    if isinstance(raw, list):
+        raw = "".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in raw)
+    elif not isinstance(raw, str):
+        raw = str(raw)
+
     # Extract JSON from the response (handles markdown code fences)
     json_match = re.search(r"\{[\s\S]*\}", raw)
     if not json_match:
         raise ValueError(f"No JSON found in LLM response: {raw[:200]}")
+
 
     data = json.loads(json_match.group())
     constraints = TripConstraints(**data.get("trip_constraints", {}))
@@ -134,21 +163,44 @@ def _extract_constraints_heuristic(query: str) -> TripConstraints:
     """Best-effort extraction without an LLM."""
     q = query.lower()
 
-    # Destination: look for "to <Place>"
-    dest_match = re.search(r"\bto\s+([A-Za-z\s]+?)(?:\s+(?:for|in|on|next|under|from|within|budget)|[,.]|$)", query, re.IGNORECASE)
+    # Destination: look for "to/in/at/for <Place>"
+    dest_match = re.search(
+        r"\b(?:to|in|at|for|visit|visiting)\s+([A-Za-z\s]+?)(?:\s+(?:for|in|on|next|under|from|within|budget)|[,.?]|$)",
+        query,
+        re.IGNORECASE,
+    )
     destination = dest_match.group(1).strip().title() if dest_match else ""
+
+    # Fallback to direct city names
+    if not destination:
+        known_cities = [
+            "dubai", "paris", "london", "new york", "tokyo",
+            "singapore", "bangkok", "goa", "jaipur", "bali",
+            "maldives", "mumbai", "delhi", "rome", "istanbul",
+        ]
+        for city in known_cities:
+            if city in q:
+                destination = city.title()
+                break
 
     # Duration: "N day(s)"
     dur_match = re.search(r"(\d+)\s*(?:day|night)", q)
     duration = int(dur_match.group(1)) if dur_match else 4
 
-    # Budget: look for numbers near ₹ or INR or "under"
-    budget_match = re.search(r"[₹rs.\s]*(\d[\d,]*)", q)
+    # Budget: look for numbers preceded/followed by budget indicators
+    budget_match = re.search(
+        r"(?:under|budget|below|within|max(?:imum)?|[₹]|rs\.?|inr)\s*[:=]?\s*([0-9][0-9,]*)",
+        q,
+    )
+    if not budget_match:
+        budget_match = re.search(r"([0-9][0-9,]*)\s*(?:rs|inr|rupees)", q)
+
     budget = 0.0
     if budget_match:
         budget = float(budget_match.group(1).replace(",", ""))
-        if budget < 1000:  # probably not a budget
+        if budget < 1000:
             budget = 0.0
+
 
     # Dates: "next month", "next week", specific date
     start_date = ""

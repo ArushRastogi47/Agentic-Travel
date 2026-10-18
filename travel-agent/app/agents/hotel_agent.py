@@ -12,6 +12,11 @@ from app.tools.hotels import get_hotel_provider
 
 def hotel_agent(state: TravelState) -> dict:
     """LangGraph node — fetch hotel options."""
+    selected = state.get("selected_agents", ["hotel"])
+    if "hotel" not in selected:
+        logger.info("[Hotel Agent] Skipping (not in selected_agents)")
+        return {}
+
     constraints = state.get("trip_constraints", {})
     destination = constraints.get("destination", "")
     start_date = constraints.get("start_date", "")
@@ -23,20 +28,20 @@ def hotel_agent(state: TravelState) -> dict:
 
     logger.info(f"[Hotel Agent] Searching: {destination} ({nights} nights)")
 
-    prev_status = state.get("workflow_status", [])
-
     try:
         provider = get_hotel_provider()
         results = provider.search_hotels(destination, start_date, end_date, nights)
-        hotels = [r.model_dump() for r in results]
+        hotels = [r.model_dump(mode="json") for r in results]
+
         logger.info(f"[Hotel Agent] Found {len(hotels)} options")
         return {
             "hotel_results": hotels,
-            "workflow_status": prev_status + ["✅ Hotel research complete"],
+            "workflow_status": ["✅ Hotel research complete"],
         }
     except Exception as exc:
         logger.error(f"[Hotel Agent] Failed: {exc}")
         return {
             "hotel_results": [],
-            "workflow_status": prev_status + ["⚠️ Hotel research failed (continuing without)"],
+            "workflow_status": ["⚠️ Hotel research failed (continuing without)"],
         }
+
