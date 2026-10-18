@@ -12,9 +12,27 @@ build/
 
 # Environment
 .env
+.env.*
+!.env.example
+
+# Secrets and credentials
+*.key
+*.pem
+*.p12
+*.pfx
+*.secret
+*.credentials
+api_keys/
+api-keys/
+secrets/
+credentials/
 
 # Database
-data/*.db
+data/
+*.db
+*.db-shm
+*.db-wal
+
 
 # IDE
 .vscode/
