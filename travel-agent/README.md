@@ -1,181 +1,200 @@
-# ✈️ LangGraph Agentic Travel Planner
+# ✈️ Agentic Travel Planner
 
-A **free-to-run, local-first agentic AI travel planner** built with **LangGraph**, **Ollama**, and **Streamlit**.
+An interactive, local-first travel planning assistant built with LangGraph. Describe a trip in natural language and the application coordinates specialist agents for flights, hotels, weather, budgeting, and itinerary planning.
 
-> ⚠️ Zero-cost: No paid APIs, no cloud services, runs entirely on your machine.
+The project is designed for experimentation and demos: travel data can run entirely from mock providers, while free live adapters are available when demo mode is disabled.
+
+## Features
+
+- **Dynamic orchestration**: a supervisor selects only the specialists needed for each request.
+- **Safety guardrails**: off-topic and unsafe requests are blocked before the workflow starts.
+- **Parallel research**: flight, hotel, and weather agents can run concurrently.
+- **Deterministic budgeting**: cost calculations use Python logic rather than an LLM.
+- **Human approval loop**: review a draft itinerary, approve it, or request changes.
+- **Persistent sessions**: LangGraph checkpoints and SQLite history allow trips to be resumed.
+- **Multiple interfaces**: use the Streamlit UI or the FastAPI REST API.
+- **Exports**: download completed itineraries as Markdown or PDF from the UI.
+- **Provider abstraction**: switch between mock data and free live adapters without changing the graph.
 
 ## Architecture
 
+```text
+User request
+     │
+     ▼
+Input guardrail ── blocked ──► End
+     │
+     ▼
+Supervisor
+     │
+     ├── Flight agent ─┐
+     ├── Hotel agent ──┼──► Join specialists
+     └── Weather agent ┘          │
+                                  ▼
+                         Deterministic budget
+                                  │
+                                  ▼
+                           Itinerary agent
+                                  │
+                                  ▼
+                           Human review
+                            ┌─────┴─────┐
+                         Changes     Approve
+                            │           │
+                            └──► Supervisor
+                                        │
+                                  Final response
 ```
-USER → [Input Guardrail] → [Supervisor Agent]
-                              ↓ dynamic selection
-         ┌──────────────┬──────────────┬──────────────┐
-    [Flight Agent]  [Hotel Agent]  [Weather Agent]
-         └──────────────┴──────────────┘
-                        ↓
-                 [Budget Agent]     (deterministic)
-                        ↓
-                [Itinerary Agent]   (LLM-powered)
-                        ↓
-                 [Human Review]     ← approve / request changes
-                        ↓
-                [Final Response]
-                        ↓
-               [Persistence / DB]
-```
 
-### Key Design Decisions
-- **Supervisor dynamically selects** which agents to run (not hard-coded)
-- **Budget calculations are deterministic** (no LLM for arithmetic)
-- **Every data source is behind an adapter** (swap live ↔ mock)
-- **Human-in-the-loop** with approve/change-request cycle
-- **All data is labeled** with provenance (live / estimated / mock)
+Weather-only and other short requests can skip unnecessary specialists and go directly to a final response.
 
-## Tech Stack
+## Technology
 
-| Component | Choice | Cost |
-|-----------|--------|------|
-| Language | Python 3.11+ | Free |
-| Orchestration | LangGraph | Free |
-| LLM | Ollama (local) | Free |
-| Backend | FastAPI | Free |
-| Frontend | Streamlit | Free |
-| Database | SQLite | Free |
-| Weather | Open-Meteo | Free |
-| Flights/Hotels | Mock adapters | Free |
+- Python 3.11+
+- LangGraph and LangChain
+- Google Gemini or Ollama for LLM-powered agents
+- Streamlit frontend
+- FastAPI and Uvicorn backend
+- SQLite with LangGraph SQLite checkpoints
+- Open-Meteo, OpenSky Network, and OpenStreetMap adapters
+- Pydantic, HTTPX, ReportLab, and pytest
 
-## Quick Start
+## Requirements
 
-### Prerequisites
-1. **Python 3.11+** installed
-2. **Ollama** installed ([ollama.ai](https://ollama.ai))
-3. **Git** installed
+Install:
 
-### Setup
+1. Python 3.11 or newer
+2. Git
+3. An LLM provider:
+   - Google Gemini API key, or
+   - [Ollama](https://ollama.com/) with a local model such as `llama3.2`
+
+## Quick start
 
 ```bash
-# 1. Clone / enter directory
+git clone <repository-url>
 cd travel-agent
 
-# 2. Create virtual environment
 python -m venv .venv
-source .venv/bin/activate  # macOS/Linux
-# .venv\Scripts\activate   # Windows
+source .venv/bin/activate          # macOS/Linux
+# .venv\Scripts\activate           # Windows PowerShell
 
-# 3. Install dependencies
 pip install -r requirements.txt
-
-# 4. Pull a local model (requires Ollama running)
-ollama pull llama3.2
-
-# 5. Configure (optional — defaults work in demo mode)
 cp .env.example .env
-# Edit .env if needed
+```
 
-# 6. Run the app
+Edit `.env` and configure an LLM. The default is Gemini:
+
+```dotenv
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-2.5-flash
+DEMO_MODE=true
+```
+
+To use Ollama instead:
+
+```bash
+ollama pull llama3.2
+ollama serve
+```
+
+```dotenv
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.2
+```
+
+Start the Streamlit application:
+
+```bash
 streamlit run app/main.py
 ```
 
-### Run with FastAPI (optional)
+Open the displayed local URL, enter a travel request, inspect the draft itinerary, and approve it or request changes.
+
+## Configuration
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `LLM_PROVIDER` | `gemini` | `gemini` or `ollama` |
+| `GEMINI_API_KEY` | empty | API key used when Gemini is selected |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model name |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
+| `OLLAMA_MODEL` | `llama3.2` | Local Ollama model |
+| `DEMO_MODE` | `true` | Use deterministic mock travel providers |
+| `DATABASE_URL` | `sqlite:///./data/travel_agent.db` | SQLite database location |
+| `LOG_LEVEL` | `INFO` | Application log level |
+| `OPEN_METEO_BASE_URL` | `https://api.open-meteo.com` | Open-Meteo base URL |
+
+`DEMO_MODE=true` keeps flight, hotel, and weather research offline by using mock adapters. Set it to `false` to enable the free live adapters. Live results may still fall back to estimates when a provider is unavailable.
+
+## FastAPI API
+
+Run the backend:
 
 ```bash
 uvicorn app.api:app --reload
 ```
 
-API endpoints:
-- `POST /trip` — Start a new trip
-- `POST /trip/{id}/resume` — Submit human feedback
-- `GET /trip/{id}` — Get trip state
+### Create a trip
 
-## Demo Mode
-
-Set `DEMO_MODE=true` in `.env` (default). This uses mock data providers — **no external APIs or Ollama needed for the UI to function** (though Ollama is needed for LLM-powered agents like Supervisor and Itinerary).
-
-## Project Structure
-
-```
-travel-agent/
-├── app/
-│   ├── main.py              # Streamlit UI
-│   ├── api.py               # FastAPI backend
-│   ├── config.py            # Configuration
-│   ├── logging_config.py    # Logging setup
-│   ├── graph/
-│   │   ├── state.py         # TravelState (shared state)
-│   │   ├── graph.py         # LangGraph graph builder
-│   │   ├── nodes.py         # Node wrappers
-│   │   └── routing.py       # Conditional routing
-│   ├── agents/
-│   │   ├── supervisor.py    # Supervisor (LLM)
-│   │   ├── flight_agent.py  # Flight search
-│   │   ├── hotel_agent.py   # Hotel search
-│   │   ├── weather_agent.py # Weather data
-│   │   ├── budget_agent.py  # Budget calc (deterministic)
-│   │   ├── itinerary_agent.py   # Itinerary (LLM)
-│   │   └── final_response_agent.py  # Final output (LLM)
-│   ├── guardrails/
-│   │   └── input_guardrail.py   # Input validation
-│   ├── tools/
-│   │   ├── llm.py           # Ollama wrapper
-│   │   ├── weather.py       # Weather providers
-│   │   ├── flights.py       # Flight providers
-│   │   ├── hotels.py        # Hotel providers
-│   │   ├── places.py        # Places/attractions
-│   │   └── routing.py       # Transport estimation
-│   ├── models/
-│   │   └── schemas.py       # Pydantic models
-│   ├── persistence/
-│   │   └── database.py      # SQLite persistence
-│   └── prompts/
-│       ├── supervisor.txt
-│       ├── itinerary.txt
-│       └── final_response.txt
-├── tests/
-│   ├── test_guardrail.py
-│   ├── test_supervisor.py
-│   ├── test_budget.py
-│   ├── test_graph.py
-│   └── test_human_loop.py
-├── data/                    # SQLite database (auto-created)
-├── requirements.txt
-├── .env.example
-└── .env
+```bash
+curl -X POST http://127.0.0.1:8000/trip \
+  -H "Content-Type: application/json" \
+  -d '{"query":"Plan a 4-day trip to Goa under ₹20,000"}'
 ```
 
-## Running Tests
+The response includes a `thread_id`. Full trip requests pause with `status: "awaiting_review"` after generating a draft.
+
+### Read trip state
+
+```bash
+curl http://127.0.0.1:8000/trip/<thread_id>
+```
+
+### Approve or request changes
+
+```bash
+curl -X POST http://127.0.0.1:8000/trip/<thread_id>/resume \
+  -H "Content-Type: application/json" \
+  -d '{"decision":"approve","feedback":""}'
+```
+
+Use `"decision":"changes"` with feedback such as `"Choose a cheaper hotel"` to send the workflow through another planning iteration.
+
+## Tests
+
+Run the test suite from the project root:
 
 ```bash
 pytest tests/ -v
 ```
 
-## Concepts Demonstrated
+The tests cover guardrails, supervisor extraction, deterministic budgeting, graph routing, human review, provider tools, and API endpoints.
 
-- ✅ LangGraph stateful agents
-- ✅ Supervisor architecture with dynamic routing
-- ✅ Conditional edges & parallel execution
-- ✅ Specialist agents (flight, hotel, weather, budget, itinerary)
-- ✅ Tool calling with provider abstraction
-- ✅ Structured outputs (Pydantic models)
-- ✅ Human-in-the-loop (approve / change cycle)
-- ✅ Deterministic + LLM hybrid architecture
-- ✅ Persistence & checkpointing (SQLite + LangGraph MemorySaver)
-- ✅ Error handling & graceful degradation
-- ✅ Data provenance (live / estimated / mock labels)
-- ✅ Offline demo mode
-- ✅ Unit & integration tests
+## Project layout
 
-## Troubleshooting
+```text
+app/
+├── agents/          Specialist and response agents
+├── graph/           LangGraph state, nodes, and routing
+├── guardrails/      Input validation and safety checks
+├── models/          Pydantic data schemas
+├── persistence/     SQLite conversation and state storage
+├── prompts/         LLM prompt templates
+├── tools/           LLM, provider, routing, and export adapters
+├── api.py           FastAPI application
+├── config.py        Environment configuration
+└── main.py          Streamlit application
+tests/               Unit and integration tests
+data/                Runtime SQLite database files
+```
 
-| Problem | Solution |
-|---------|----------|
-| `Connection refused` on LLM calls | Make sure Ollama is running: `ollama serve` |
-| Model not found | Run `ollama pull llama3.2` |
-| Import errors | Ensure venv is activated and `pip install -r requirements.txt` was run |
-| Streamlit not loading | Check Python version ≥ 3.11 |
+## Data and safety notes
 
-## Important Disclaimers
-
-- All flight and hotel data in demo mode is **estimated/mock** — not real availability
-- No bookings are made — this is a planning tool only
-- Weather data from Open-Meteo is live when `DEMO_MODE=false`
-- Budget calculations are estimates based on average costs
+- Mock flight and hotel results are estimates, not live availability.
+- Live provider responses are informational and may be incomplete or stale.
+- The application does not make bookings or process payments.
+- Budget totals are estimates based on the inputs and available provider data.
+- Keep API keys in `.env`; do not commit secrets.
